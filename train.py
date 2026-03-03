@@ -14,6 +14,8 @@ import torchvision as tv
 
 import transformer_flow
 import utils
+import sys
+from tqdm import tqdm
 
 
 def main(args):
@@ -24,6 +26,10 @@ def main(args):
     def print(*args, **kwargs):
         if dist.local_rank == 0:
             builtins.print(*args, **kwargs)
+
+    print("sys.executable:", sys.executable)
+    print("sys.version:", sys.version)
+    print("torch version:", torch.__version__)
 
     print(f'{" Config ":-^80}')
     for k, v in sorted(vars(args).items()):
@@ -107,8 +113,20 @@ def main(args):
 
     print(f'{" Training ":-^80}')
     for epoch in range(args.epochs):
+
+        if dist.local_rank == 0:
+            pbar = tqdm(
+                data_loader,
+                total=len(data_loader),
+                desc=f"Epoch {epoch+1}/{args.epochs}",
+                leave=False,
+                dynamic_ncols=True,
+            )
+        else:
+            pbar = data_loader
+
         metrics = utils.Metrics()
-        for x, y in data_loader:
+        for x, y in pbar:
             x = x.cuda()
             if args.noise_type == 'gaussian':
                 eps = args.noise_std * torch.randn_like(x)

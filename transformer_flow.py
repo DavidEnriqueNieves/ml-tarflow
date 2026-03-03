@@ -3,6 +3,7 @@
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 #
 import torch
+from typing import Tuple
 
 
 class Permutation(torch.nn.Module):
@@ -41,7 +42,7 @@ class Attention(torch.nn.Module):
         self.v_cache: dict[str, list[torch.Tensor]] = {'cond': [], 'uncond': []}
 
     def forward_spda(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None, temp: float = 1.0, which_cache: str = 'cond'
+        self, x: torch.Tensor, mask: torch.Tensor = None, temp: float = 1.0, which_cache: str = 'cond'
     ) -> torch.Tensor:
         B, T, C = x.size()
         x = self.norm(x.float()).type(x.dtype)
@@ -62,7 +63,7 @@ class Attention(torch.nn.Module):
         return x
 
     def forward_base(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None, temp: float = 1.0, which_cache: str = 'cond'
+        self, x: torch.Tensor, mask: torch.Tensor = None, temp: float = 1.0, which_cache: str = 'cond'
     ) -> torch.Tensor:
         B, T, C = x.size()
         x = self.norm(x.float()).type(x.dtype)
@@ -83,7 +84,7 @@ class Attention(torch.nn.Module):
         return x
 
     def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None, temp: float = 1.0, which_cache: str = 'cond'
+        self, x: torch.Tensor, mask: torch.Tensor = None, temp: float = 1.0, which_cache: str = 'cond'
     ) -> torch.Tensor:
         if self.USE_SPDA:
             return self.forward_spda(x, mask, temp, which_cache)
@@ -111,7 +112,7 @@ class AttentionBlock(torch.nn.Module):
         self.mlp = MLP(channels, expansion)
 
     def forward(
-        self, x: torch.Tensor, attn_mask: torch.Tensor | None = None, attn_temp: float = 1.0, which_cache: str = 'cond'
+        self, x: torch.Tensor, attn_mask: torch.Tensor = None, attn_temp: float = 1.0, which_cache: str = 'cond'
     ) -> torch.Tensor:
         x = x + self.attention(x, attn_mask, attn_temp, which_cache)
         x = x + self.mlp(x)
@@ -150,7 +151,7 @@ class MetaBlock(torch.nn.Module):
         self.permutation = permutation
         self.register_buffer('attn_mask', torch.tril(torch.ones(num_patches, num_patches)))
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, y: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         x = self.permutation(x)
         pos_embed = self.permutation(self.pos_embed, dim=0)
         x_in = x
@@ -185,10 +186,10 @@ class MetaBlock(torch.nn.Module):
         x: torch.Tensor,
         pos_embed: torch.Tensor,
         i: int,
-        y: torch.Tensor | None = None,
+        y: torch.Tensor = None,
         attn_temp: float = 1.0,
         which_cache: str = 'cond',
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         x_in = x[:, i : i + 1]  # get i-th patch but keep the sequence dimension
         x = self.proj_in(x_in) + pos_embed[i : i + 1]
         if self.class_embed is not None:
@@ -218,7 +219,7 @@ class MetaBlock(torch.nn.Module):
     def reverse(
         self,
         x: torch.Tensor,
-        y: torch.Tensor | None = None,
+        y: torch.Tensor = None,
         guidance: float = 0,
         guide_what: str = 'ab',
         attn_temp: float = 1.0,
@@ -265,6 +266,7 @@ class Model(torch.nn.Module):
         super().__init__()
         self.img_size = img_size
         self.patch_size = patch_size
+        self.in_channels: int = in_channels
         self.num_patches = (img_size // patch_size) ** 2
         permutations = [PermutationIdentity(self.num_patches), PermutationFlip(self.num_patches)]
 
@@ -296,8 +298,8 @@ class Model(torch.nn.Module):
         return torch.nn.functional.fold(u, (self.img_size, self.img_size), self.patch_size, stride=self.patch_size)
 
     def forward(
-        self, x: torch.Tensor, y: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, list[torch.Tensor], torch.Tensor]:
+        self, x: torch.Tensor, y: torch.Tensor = None
+    ) -> Tuple[torch.Tensor, list[torch.Tensor], torch.Tensor]:
         x = self.patchify(x)
         outputs = []
         logdets = torch.zeros((), device=x.device)
@@ -317,13 +319,13 @@ class Model(torch.nn.Module):
     def reverse(
         self,
         x: torch.Tensor,
-        y: torch.Tensor | None = None,
+        y: torch.Tensor = None,
         guidance: float = 0,
         guide_what: str = 'ab',
         attn_temp: float = 1.0,
         annealed_guidance: bool = False,
         return_sequence: bool = False,
-    ) -> torch.Tensor | list[torch.Tensor]:
+    ) -> torch.Tensor:
         seq = [self.unpatchify(x)]
         x = x * self.var.sqrt()
         for block in reversed(self.blocks):
